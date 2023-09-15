@@ -16,7 +16,7 @@ import sys
 sys.path.append("../..")
 sys.path.append(".")
 from utils import readlines
-from kitti_utils import generate_depth_map
+from utils import generate_depth_map
 
 
 def export_gt_depths_kitti():

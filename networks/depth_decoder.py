@@ -13,7 +13,7 @@ import torch.nn.functional as F
 from .denseaspp import DenseAspp
 
 from collections import OrderedDict
-from layers import *
+from networks.layers import *
 
 class DepthDecoder(nn.Module):
     def __init__(self, num_ch_enc, 
@@ -189,7 +189,7 @@ class DepthDecoder(nn.Module):
             # ground_angle = torch.arctan(-(gy_min + 0.5 * dgy) / (1.92 * dgy))
             # norm_angle = ground_angle + np.pi / 2
             # xz_norm = torch.stack([torch.zeros_like(norm_angle), torch.sin(norm_angle), torch.cos(norm_angle)], dim=1)
-            # xz_norm = xz_norm[:, None, :].expand(-1, self.xz_levels, -1)
+            # xz_norm = xz_norm[:, None, :].expand(-1, self.ground_planes, -1)
             # norm = torch.cat([norm, xz_norm], dim=1)
             # xz_distance = h * torch.sin(norm_angle)[:, None] * dgx[:, None] / dgy[:, None]
             # distance = torch.cat([distance, xz_distance], dim=1)

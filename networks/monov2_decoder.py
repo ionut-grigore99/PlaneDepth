@@ -11,7 +11,7 @@ import torch
 import torch.nn as nn
 
 from collections import OrderedDict
-from layers import *
+from networks.layers import *
 
 
 class Monov2Decoder(nn.Module):

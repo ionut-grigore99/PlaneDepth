@@ -20,7 +20,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
 
-from layers import create_camera_plane
+from networks.layers import create_camera_plane
 
 
 # def FAL_net2B_gep(data=None, no_levels=49):
@@ -253,10 +253,10 @@ class PladeNet(nn.Module):
         # self.disp_layered = self.disp_layered[None, :, None, None].expand(-1, -1, self.height, self.width).cuda()
         
         # self.camera_plane = create_camera_plane(height=self.height, width=self.width)
-        # if self.xz_levels > 0:
+        # if self.ground_planes > 0:
         #     y_coords = self.camera_plane[:, 1:2, :, :]
         #     y_coords[y_coords<1e-7] = 1e-7
-        #     self.xz_layer = torch.linspace(xz_min, xz_max, self.xz_levels)
+        #     self.xz_layer = torch.linspace(xz_min, xz_max, self.ground_planes)
         #     self.xz_layer = self.xz_layer[None, :, None, None].expand(-1, -1, self.height, self.width).cuda()
         #     self.xz_layer = self.xz_layer / y_coords
         #     self.xz_layer = 0.1 * 0.58 * self.width / self.xz_layer

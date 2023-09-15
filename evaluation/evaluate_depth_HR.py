@@ -12,9 +12,9 @@ from torch.utils.data import DataLoader
 
 # from layers import disp_to_depth
 from utils import readlines
-from options import MonodepthOptions
 import datasets
 import networks
+from config.conf import TrainConf
 
 cv2.setNumThreads(0)  # This speeds up evaluation 5x on our unix systems (OpenCV 3.3.1)
 
@@ -59,43 +59,46 @@ def batch_post_process_disparity(l_disp, r_disp):
     return m_disp#r_mask * l_disp + l_mask * r_disp + (1.0 - l_mask - r_mask) * m_disp
 
 
-def evaluate(opt):
+def evaluate():
     """Evaluates a pretrained model using a specified test set
     """
     MIN_DEPTH = 1e-3
     MAX_DEPTH = 80
 
-    assert sum((opt.eval_mono, opt.eval_stereo)) == 1, \
+    assert sum((eval_mono, eval_stereo)) == 1, \
         "Please choose mono or stereo evaluation by setting either --eval_mono or --eval_stereo"
 
-    if opt.ext_disp_to_eval is None:
+    conf = TrainConf().conf
+    get = lambda x: conf.get(x)
 
-        opt.load_weights_folder = os.path.expanduser(opt.load_weights_folder)
+    if ext_disp_to_eval is None:
 
-        assert os.path.isdir(opt.load_weights_folder), \
-            "Cannot find a folder at {}".format(opt.load_weights_folder)
+        get('load_weights_folder') = os.path.expanduser(opt.load_weights_folder)
 
-        print("-> Loading weights from {}".format(opt.load_weights_folder))
+        assert os.path.isdir(get('load_weights_folder')), \
+            "Cannot find a folder at {}".format(get('load_weights_folder'))
 
-        filenames = readlines(os.path.join(splits_dir, opt.eval_split, "test_files.txt"))
-        dataset = datasets.KITTIRAWDataset(opt.data_path, filenames,
-                                           opt.height, opt.width,
-                                           opt.novel_frame_ids, is_train=False, use_crop=False, use_colmap=False, img_ext=".png")
-        dataloader = DataLoader(dataset, opt.batch_size, shuffle=False, num_workers=opt.num_workers,
+        print("-> Loading weights from {}".format(get('load_weights_folder')))
+
+        filenames = readlines(os.path.join(splits_dir, eval_split, "test_files.txt"))
+        dataset = datasets.KITTIRAWDataset(get('kitti_path'), filenames,
+                                           get('height'), get('width'),
+                                           get('novel_frame_ids'), is_train=False, use_crop=False, use_colmap=False, img_ext=".png")
+        dataloader = DataLoader(dataset, get('bs'), shuffle=False, num_workers=get('workers'),
                                 pin_memory=True, drop_last=False)
         
         
-        if opt.net_type == "ResNet":
+        if get('net_type') == "ResNet":
             encoder_path = os.path.join(opt.load_weights_folder, "encoder.pth")
             decoder_path = os.path.join(opt.load_weights_folder, "depth.pth")
             encoder_dict = torch.load(encoder_path)
-            encoder = networks.ResnetEncoder(opt.num_layers, False)
+            encoder = networks.ResnetEncoder(opt.num_resnet_layers, False)
             depth_decoder = networks.DepthDecoder(encoder.num_ch_enc, 
                                                     opt.disp_levels, 
                                                     opt.disp_min, 
                                                     opt.disp_max, 
                                                     opt.num_ep, 
-                                                    pe_type=opt.pe_type,
+                                                    pe_type=opt.pos_emb_type,
                                                     use_denseaspp=opt.use_denseaspp, 
                                                     xz_levels=opt.xz_levels,
                                                     yz_levels=opt.yz_levels, 
@@ -145,7 +148,7 @@ def evaluate(opt):
             for data in dataloader:
                 input_color = data[("color", "l")].cuda()
 
-                if opt.post_process:
+                if post_process:
                     # Post-processed results require each image to have two forward passes
                     input_color = torch.cat((input_color, torch.flip(input_color, [3])), 0)
 
@@ -160,7 +163,7 @@ def evaluate(opt):
 
                 pred_disp = output["disp"][:, 0].cpu().numpy()
 
-                if opt.post_process:
+                if post_process:
                     N = pred_disp.shape[0] // 2
                     pred_disp = batch_post_process_disparity(pred_disp[:N], pred_disp[N:, :, ::-1])
 
@@ -176,23 +179,23 @@ def evaluate(opt):
         print("-> Loading predictions from {}".format(opt.ext_disp_to_eval))
         pred_disps = np.load(opt.ext_disp_to_eval)
 
-        if opt.eval_eigen_to_benchmark:
+        if eval_eigen_to_benchmark:
             eigen_to_benchmark_ids = np.load(
                 os.path.join(splits_dir, "benchmark", "eigen_to_benchmark_ids.npy"))
 
             pred_disps = pred_disps[eigen_to_benchmark_ids]
 
-    if opt.save_pred_disps:
+    if save_pred_disps:
         output_path = os.path.join(
             opt.load_weights_folder, "disps_{}_split.npy".format(opt.eval_split))
         print("-> Saving predicted disparities to ", output_path)
         np.save(output_path, pred_disps)
 
-    if opt.no_eval:
+    if no_eval:
         print("-> Evaluation disabled. Done.")
         quit()
 
-    elif opt.eval_split == 'benchmark':
+    elif eval_split == 'benchmark':
         save_dir = os.path.join(opt.load_weights_folder, "benchmark_predictions")
         print("-> Saving out benchmark predictions to {}".format(save_dir))
         if not os.path.exists(save_dir):
@@ -209,16 +212,16 @@ def evaluate(opt):
         print("-> No ground truth is available for the KITTI benchmark, so not evaluating. Done.")
         quit()
 
-    gt_path = os.path.join(splits_dir, opt.eval_split, "gt_depths.npz")
+    gt_path = os.path.join(splits_dir, eval_split, "gt_depths.npz")
     gt_depths = np.load(gt_path, fix_imports=True, encoding='latin1', allow_pickle=True)["data"]
 
     print("-> Evaluating")
 
-    if opt.eval_stereo:
+    if eval_stereo:
         print("   Stereo evaluation - "
               "disabling median scaling, scaling by {}".format(STEREO_SCALE_FACTOR))
-        opt.disable_median_scaling = True
-        opt.pred_depth_scale_factor = STEREO_SCALE_FACTOR
+        disable_median_scaling = True
+        pred_depth_scale_factor = STEREO_SCALE_FACTOR
     else:
         print("   Mono evaluation - using median scaling")
 
@@ -235,7 +238,7 @@ def evaluate(opt):
         pred_disp = cv2.resize(pred_disp, (gt_width, gt_height))
         pred_depth = 0.1 * 0.58 * opt.width / (pred_disp)
 
-        if opt.eval_split == "eigen_raw" or opt.eval_split == "eigen_improved":
+        if eval_split == "eigen_raw" or eval_split == "eigen_improved":
             gt_depth[gt_depth < MIN_DEPTH] = MIN_DEPTH
             gt_depth[gt_depth > MAX_DEPTH] = MAX_DEPTH
             mask = np.logical_and(gt_depth > MIN_DEPTH, gt_depth < MAX_DEPTH)
@@ -255,8 +258,8 @@ def evaluate(opt):
         pred_depth = pred_depth[mask]
         gt_depth = gt_depth[mask]
 
-        pred_depth *= opt.pred_depth_scale_factor
-        if not opt.disable_median_scaling:
+        pred_depth *= pred_depth_scale_factor
+        if not disable_median_scaling:
             ratio = np.median(gt_depth) / np.median(pred_depth)
             # ratio = np.mean(gt_depth) / np.mean(pred_depth)
             ratios.append(ratio)
@@ -267,7 +270,7 @@ def evaluate(opt):
 
         errors.append(compute_errors(gt_depth, pred_depth))
 
-    if not opt.disable_median_scaling:
+    if not disable_median_scaling:
         ratios = np.array(ratios)
         med = np.median(ratios)
         print(" Scaling ratios | med: {:0.3f} | std: {:0.3f}".format(med, np.std(ratios / med)))
@@ -280,5 +283,17 @@ def evaluate(opt):
 
 
 if __name__ == "__main__":
-    options = MonodepthOptions()
-    evaluate(options.parse())
+    eval_stereo = False  # if set evaluates in stereo mode
+    eval_mono = True  # if set evaluates in mono mode
+    no_eval = False  # if set disables evaluation
+    eval_split = "eigen_raw"  # which split to run eval on; choices=["eigen_raw", "eigen_improved", "eigen_benchmark", "benchmark", "odom_9", "odom_10", "city"]
+    disable_median_scaling = True #if set disables median scaling in evaluation
+    pred_depth_scale_factor = 1 #if set multiplies predictions by this number
+    ext_disp_to_eval = "" #optional path to a .npy disparities file to evaluate
+    save_pred_disps = False #if set saves predicted disparities
+    eval_eigen_to_benchmark = False #if set assume we are loading eigen results from npy but we want to evaluate using the new benchmark
+    eval_out_dir = "" #if set will output the disparities to this folder
+    post_process = False #if set will perform the flipping post processing from the original monodepth paper
+
+
+    evaluate()

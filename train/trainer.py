@@ -22,8 +22,8 @@ from tensorboardX import SummaryWriter
 import json
 
 from utils import *
-from kitti_utils import *
-from layers import *
+from utils import *
+from networks.layers import *
 
 import datasets as datasets
 import networks
@@ -106,7 +106,7 @@ class Trainer:
         if self.opt.load_weights_folder is not None:
             self.load_model()
             
-        if self.opt.self_distillation > 0:
+        if self.opt.lambda_self_distillation > 0:
             self.fixed_models = {}
             self.fixed_models["encoder"] = copy.deepcopy(self.models["encoder"].module).eval()
             self.fixed_models["depth"] = copy.deepcopy(self.models["depth"].module).eval()
@@ -189,7 +189,7 @@ class Trainer:
         models = {}
         if self.opt.net_type == "ResNet":
             print("train ResNet")
-            self.models["encoder"] = networks.ResnetEncoder(self.opt.num_layers, True)
+            self.models["encoder"] = networks.ResnetEncoder(self.opt.num_resnet_layers, True)
             self.models["depth"] = networks.DepthDecoder(self.models["encoder"].num_ch_enc, 
                                                          self.opt.disp_levels, 
                                                          self.opt.disp_min, 
@@ -303,8 +303,8 @@ class Trainer:
             duration = time.time() - before_op_time
 
             # log less frequently after the first 2000 steps to save time & disk space
-            early_phase = batch_idx % 100 == 0 and self.step < self.opt.log_frequency
-            late_phase = self.step % self.opt.log_frequency == 0
+            early_phase = batch_idx % 100 == 0 and self.step < 500 #self.opt.log_frequency
+            late_phase = self.step % 500 == 0 #self.opt.log_frequency == 0
 
             if early_phase or late_phase:
                 if dist.get_rank() == 0:
@@ -344,7 +344,7 @@ class Trainer:
         if self.opt.use_mom and inputs[("color", "l")].shape[0] == self.opt.batch_size*2:
             self.mirror_occlusion_mask(outputs)
             
-        if self.opt.self_distillation > 0.:
+        if self.opt.lambda_self_distillation > 0.:
             with torch.no_grad():
                 outputs["disp_pp"], outputs["mask_novel"] = self.generate_post_process_disp(inputs)
             
@@ -495,8 +495,10 @@ class Trainer:
                         metrics[k] += v * B
                     else:
                         metrics[k] = v * B
-                
-                if batch_idx % self.opt.log_img_frequency == 0 and self.local_rank == 0:
+
+
+                '''if batch_idx % self.opt.log_img_frequency == 0'''
+                if batch_idx % 250 == 0  and self.local_rank == 0:
                     self.log_img("val", inputs, outputs, batch_idx)
                 del inputs, outputs, losses
             # since the eval batch size is not the same
@@ -748,17 +750,17 @@ class Trainer:
             else:
                 pc_loss = self.perceptual_loss(pred, target, inputs[(color_name, "l")]).mean()
             losses["loss/pc_loss"] += pc_loss
-            total_loss += self.opt.alpha_pc * pc_loss
+            total_loss += self.opt.lambda_pc * pc_loss
             
             if self.opt.alpha_self > 0.:
                 self_loss = self.compute_reprojection_loss(outputs[("self_rec", target_side)], inputs[(color_name, "l")]).mean()
                 losses["loss/self_loss"] += self_loss
                 total_loss += self.opt.alpha_self * self_loss
                 
-            if self.opt.self_distillation > 0:
+            if self.opt.lambda_self_distillation > 0:
                 disp_loss = torch.abs(outputs["disp"] - outputs["disp_pp"]).mean()
                 losses["loss/disp_loss"] = disp_loss
-                total_loss += self.opt.self_distillation * disp_loss
+                total_loss += self.opt.lambda_self_distillation * disp_loss
             
             losses["loss/total_loss"] += total_loss
             
@@ -768,7 +770,7 @@ class Trainer:
         smooth_loss = get_smooth_loss_disp(outputs["disp"][..., int(0.2 * W):], inputs[("color", "l")][..., int(0.2 * W):], gamma=self.opt.gamma_smooth)
         losses["loss/smooth_loss"] = smooth_loss
         
-        losses["loss/total_loss"] += self.opt.alpha_smooth * smooth_loss
+        losses["loss/total_loss"] += self.opt.lambda_smooth * smooth_loss
             
         return losses
 

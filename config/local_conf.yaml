@@ -1,0 +1,70 @@
+model:
+  name: mdp #name of the folder to save the model in, trebuie sa vad ce naiba pun aici
+  net_type: ResNet #train which network; choices=["PladeNet", "ResNet", "FalNet"]; ResNet e folosit in paper, celelalte 2 sunt pt comparisons
+  num_resnet_layers: 50 # number of resnet layers for encoder; choices: [18, 34, 50, 101, 152])
+  use_denseaspp: True #if set, use DenseAspp block in ResNet between the first two blocks of the depth decoder
+
+
+# optimizers
+# -----------
+optim: "adamw" #in caz ca vreau eu sa schimb sa incerc alt optimizator
+adamw: # default values
+  lr: 0.0001
+  beta1: 0.5
+  beta2: 0.999
+  amsgrad: true #added by me
+  wd: 0 # added by me, disable regularization when trying to overfit
+
+# loss
+# -----------
+avg_reprojection: False #if set, uses average reprojection loss; for ablation but it is not used
+use_ssim: False #if set, use ssim in the reprojection loss (0.85*ssim + 0.15*l1_loss)
+use_mixture_loss: False #if set, use mixture loss
+gamma_smooth: 2 #gamma of smooth loss -> see edge aware smoothnes with image gradients
+lambda_pc: 0.1 #perceptual loss weight
+lambda_smooth: 0.04 #disparity smoothness loss weight
+lambda_self_distillation: 0. #self_distillation loss weight, in paper e setat pe 1
+alpha_self: 0. #asta nu stiu ce MM face!!!!!
+automask: True #if set, use auto-masking
+use_mom: True #if set, use mirror occlusion mask (mom)
+pc_net: vgg19 #the type of net to compute pc loss; choices=["vgg19", "resnet18"])
+
+# misc
+# -----------
+kitti_path: "/home/ionut/Desktop/kitti"
+dataset: kitti #dataset to train on; choices=["kitti", "kitti_odom", "kitti_depth", "kitti_test"])
+split: eigen_full_left #which training split to use; choices=["eigen_zhou", "eigen_full", "eigen_full_left", "odom", "benchmark"]
+png: True #if set, trains from raw KITTI png files instead of jpgs
+tensorboard_path: "./log"
+use_cuda: true
+bs: 8
+workers: 0 #ei au pus in paper 12, sa vad cat oi pune eu
+epochs: 50
+iters: 1_000 #added by me, sa vad cat sa pun
+im_sz: [192, 640]
+scheduler_step_size: 15 #epochs at which learning rate times 0.1
+clip_grad_norm: true #added by me
+ground_planes: 14 #number levels of xz (horizontal or ground) plane
+vertical_planes: 0 #number levels of yz (vertical) plane
+disp_min: 2. #minimum depth
+disp_max: 300. #maximum depth
+disp_levels: 49 #number levels of disp -> nuj ce naiba ii asta
+disp_layers: 2 #number layers of disp -> nuj care ii dif dintre asta si aia de mai sus
+no_crop: True #if set, do not use resize crop data aug
+no_stereo: False #if set, disable stereo supervised
+pos_emb_type: neural #the type of positional embedding; choices=["neural", "frequency"]
+novel_frame_ids: [] #frames to load
+num_ep: 8 #train which stage
+warp_type: "disp_warp" #the type of warp; choices=["depth_warp", "disp_warp", "homography_warp"]
+match_aug: True # if set, use color augmented data to compute loss
+flip_right: True #use fliped right image to train
+depth_regression_space: "inv" #how to compute regression depth; choices=["inv", "exp"]
+render_probability: True #If set, render probability as NeRF
+plane_residual: True #If set, use residual plane based on init plane
+use_colmap: True #if set, use colmap instead of predicting pose by posenet
+colmap_path: "./kitti_colmap" #path to the colmap data, ce plm inseamna colmap? color map oare?
+start_epoch: 0 #nu stiu ce rahat e asta, ei zic ca number of epochs
+milestones: [30, 40] #epochs at which learning rate is divided by 2
+load_weights_folder: "" #name of model to load
+models_to_load: ["encoder", "depth"] #models to load
+stage1_weights_folder: "" #path of teacher model to load
