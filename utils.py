@@ -284,3 +284,4 @@ def generate_depth_map(calib_dir, velo_filename, cam=2, vel_depth=False):
     depth[depth < 0] = 0
 
     return depth
+#dummy
