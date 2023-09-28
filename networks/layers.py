@@ -1,9 +1,3 @@
-# Copyright Niantic 2019. Patent Pending. All rights reserved.
-#
-# This software is licensed under the terms of the Monodepth2 licence
-# which allows for non-commercial use only, the full terms of which are made
-# available in the LICENSE file.
-
 from __future__ import absolute_import, division, print_function
 
 import numpy as np
@@ -15,9 +9,10 @@ import torchvision
 
 
 def transformation_from_parameters(axisangle, translation, invert=False):
-    """Convert the network's (axisangle, translation) output into a 4x4 matrix
     """
-    R = rot_from_axisangle(axisangle)
+        Convert the network's (axisangle, translation) output into a 4x4 matrix
+    """
+    R = get_rotation_matrix(axisangle)
     t = translation.clone()
 
     if invert:
@@ -35,7 +30,8 @@ def transformation_from_parameters(axisangle, translation, invert=False):
 
 
 def get_translation_matrix(translation_vector):
-    """Convert a translation vector into a 4x4 transformation matrix
+    """
+        Convert a translation vector into a 4x4 transformation matrix
     """
     T = torch.zeros(translation_vector.shape[0], 4, 4).to(device=translation_vector.device)
 
@@ -50,13 +46,14 @@ def get_translation_matrix(translation_vector):
     return T
 
 
-def rot_from_axisangle(vec):
-    """Convert an axisangle rotation into a 4x4 transformation matrix
-    (adapted from https://github.com/Wallacoloo/printipi)
-    Input 'vec' has to be Bx1x3
+def get_rotation_matrix(axisangle):
     """
-    angle = torch.norm(vec, 2, 2, True)
-    axis = vec / (angle + 1e-7)
+        Convert an axisangle rotation into a 4x4 transformation matrix
+        (adapted from https://github.com/Wallacoloo/printipi)
+        Input 'axisangle' has to be Bx1x3
+    """
+    angle = torch.norm(axisangle, 2, 2, True)
+    axis = axisangle / (angle + 1e-7)
 
     ca = torch.cos(angle)
     sa = torch.sin(angle)
@@ -76,7 +73,7 @@ def rot_from_axisangle(vec):
     yzC = y * zC
     zxC = z * xC
 
-    rot = torch.zeros((vec.shape[0], 4, 4)).to(device=vec.device)
+    rot = torch.zeros((axisangle.shape[0], 4, 4)).to(device=axisangle.device)
 
     rot[:, 0, 0] = torch.squeeze(x * xC + ca)
     rot[:, 0, 1] = torch.squeeze(xyC - zs)
@@ -93,7 +90,8 @@ def rot_from_axisangle(vec):
 
 
 class ConvBlock(nn.Module):
-    """Layer to perform a convolution followed by ELU
+    """
+        Layer to perform a convolution followed by ELU
     """
     def __init__(self, in_channels, out_channels):
         super(ConvBlock, self).__init__()
@@ -126,7 +124,8 @@ class Conv3x3(nn.Module):
 
 
 class BackprojectDepth(nn.Module):
-    """Layer to transform a depth image into a point cloud
+    """
+        Layer to transform a depth image into a point cloud
     """
     def __init__(self, height, width):
         super(BackprojectDepth, self).__init__()
@@ -157,7 +156,8 @@ class BackprojectDepth(nn.Module):
 
 
 class Project3D(nn.Module):
-    """Layer which projects 3D points into a camera with intrinsics K and at position T
+    """
+        Layer which projects 3D points into a camera with intrinsics K and at position T
     """
     def __init__(self, height, width, eps=1e-7):
         super(Project3D, self).__init__()
@@ -182,7 +182,8 @@ class Project3D(nn.Module):
         return pix_coords
     
 class HomographyWarp(nn.Module):
-    """Layer to transform a depth image into a point cloud
+    """
+        Layer to transform a depth image into a point cloud
     """
     def __init__(self, height, width):
         super(HomographyWarp, self).__init__()
@@ -235,46 +236,16 @@ class HomographyWarp(nn.Module):
 
 
 def upsample(x):
-    """Upsample input tensor by a factor of 2
+    """
+        Upsample input tensor by a factor of 2
     """
     return F.interpolate(x, scale_factor=2, mode="nearest")
 
 
-def get_smooth_loss_disp(disp, img, gamma=1):
-    """Computes the smoothness loss for a disparity image
-    The color image is used for edge-aware smoothness
-    """
-    grad_disp_x = torch.abs(disp[:, :, :, :-1] - disp[:, :, :, 1:])
-    grad_disp_y = torch.abs(disp[:, :, :-1, :] - disp[:, :, 1:, :])
-
-    grad_img_x = torch.mean(torch.abs(img[:, :, :, :-1] - img[:, :, :, 1:]), 1, keepdim=True)
-    grad_img_y = torch.mean(torch.abs(img[:, :, :-1, :] - img[:, :, 1:, :]), 1, keepdim=True)
-
-    grad_disp_x *= torch.exp(-gamma*grad_img_x)
-    grad_disp_y *= torch.exp(-gamma*grad_img_y)
-
-    return grad_disp_x.mean() + grad_disp_y.mean()
-
-def get_smooth_loss_probability(probability, disp_layered, img, gamma=1):
-    """Computes the smoothness loss for a disparity image
-    The color image is used for edge-aware smoothness
-    """
-    grad_disp_x = torch.abs(probability[:, :, :, :-1] - probability[:, :, :, 1:]) * (disp_layered[:, :, :, :-1] + disp_layered[:, :, :, 1:]) / 2.
-    grad_disp_x = grad_disp_x.sum(1, True)
-    grad_disp_y = torch.abs(probability[:, :, :-1, :] - probability[:, :, 1:, :]) * (disp_layered[:, :, :-1, :] + disp_layered[:, :, 1:, :]) / 2.
-    grad_disp_y = grad_disp_y.sum(1, True)
-
-    grad_img_x = torch.mean(torch.abs(img[:, :, :, :-1] - img[:, :, :, 1:]), 1, keepdim=True)
-    grad_img_y = torch.mean(torch.abs(img[:, :, :-1, :] - img[:, :, 1:, :]), 1, keepdim=True)
-
-    grad_disp_x *= torch.exp(-gamma*grad_img_x)
-    grad_disp_y *= torch.exp(-gamma*grad_img_y)
-
-    return grad_disp_x.mean() + grad_disp_y.mean()
-
 
 class SSIM(nn.Module):
-    """Layer to compute the SSIM loss between a pair of images
+    """
+        Layer to compute the SSIM loss between a pair of images
     """
     def __init__(self):
         super(SSIM, self).__init__()
@@ -353,25 +324,6 @@ def get_embedder(multires):
     #embed = lambda x, eo=embedder_obj : eo.embed(x)
     return embedder_obj#, embedder_obj.out_dim
 
-def compute_depth_errors(gt, pred):
-    """Computation of error metrics between predicted and ground truth depths
-    """
-    thresh = torch.max((gt / pred), (pred / gt))
-    a1 = (thresh < 1.25     ).float().mean()
-    a2 = (thresh < 1.25 ** 2).float().mean()
-    a3 = (thresh < 1.25 ** 3).float().mean()
-
-    rmse = (gt - pred) ** 2
-    rmse = torch.sqrt(rmse.mean())
-
-    rmse_log = (torch.log(gt) - torch.log(pred)) ** 2
-    rmse_log = torch.sqrt(rmse_log.mean())
-
-    abs_rel = torch.mean(torch.abs(gt - pred) / gt)
-
-    sq_rel = torch.mean((gt - pred) ** 2 / gt)
-
-    return abs_rel, sq_rel, rmse, rmse_log, a1, a2, a3
 
 
 # Define VGG19 from FALNet
@@ -422,7 +374,8 @@ class Vgg19_pc(torch.nn.Module):
             return h_relu1_2, h_relu2_2, h_relu3_4
         
 class Resnet18_pc(nn.Module):
-    """Pytorch module for a resnet encoder
+    """
+        Pytorch module for a resnet encoder
     """
     def __init__(self, requires_grad=False):
         super(Resnet18_pc, self).__init__()
@@ -457,10 +410,6 @@ def laplacian(error, b):
 def distribution(error, sigma, dist="gaussian"):
     return gaussian(error, sigma) if dist=="gaussian" else \
            laplacian(error, sigma)
-
-def bimodal_loss(error0, error1, sigma0, sigma1, w0, w1, dist="gaussian"):
-    return - torch.log(w0 * distribution(error0, sigma0, dist) + \
-                       w1 * distribution(error1, sigma1, dist))
 
 def multimodal_loss(error, sigma, pi, dist='gaussian'):
     return - torch.log( torch.sum(pi * distribution(error, sigma, dist), dim=1, keepdim=True) + 1e-7)

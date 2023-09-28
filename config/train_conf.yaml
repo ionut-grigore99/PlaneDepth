@@ -1,5 +1,5 @@
 model:
-  name: mdp #name of the folder to save the model in, trebuie sa vad ce naiba pun aici
+  name: exp1 #name of the folder to save the model in, trebuie sa vad ce naiba pun aici
   net_type: ResNet #train which network; choices=["PladeNet", "ResNet", "FalNet"]; ResNet e folosit in paper, celelalte 2 sunt pt comparisons
   num_resnet_layers: 50 # number of resnet layers for encoder; choices: [18, 34, 50, 101, 152])
   use_denseaspp: True #if set, use DenseAspp block in ResNet between the first two blocks of the depth decoder
@@ -31,7 +31,7 @@ pc_net: vgg19 #the type of net to compute pc loss; choices=["vgg19", "resnet18"]
 
 # misc
 # -----------
-kitti_path: "/home/ionut/Desktop/kitti"
+kitti_path: "/home/ANT.AMAZON.COM/grigiono/Desktop/kitti" #sau ANT.AMAZON.COM/grigiono in loc de ionut
 dataset: kitti #dataset to train on; choices=["kitti", "kitti_odom", "kitti_depth", "kitti_test"])
 split: eigen_full_left #which training split to use; choices=["eigen_zhou", "eigen_full", "eigen_full_left", "odom", "benchmark"]
 png: True #if set, trains from raw KITTI png files instead of jpgs
@@ -65,6 +65,6 @@ use_colmap: True #if set, use colmap instead of predicting pose by posenet
 colmap_path: "./kitti_colmap" #path to the colmap data, ce plm inseamna colmap? color map oare?
 start_epoch: 0 #nu stiu ce rahat e asta, ei zic ca number of epochs
 milestones: [30, 40] #epochs at which learning rate is divided by 2
-load_weights_folder: "" #name of model to load
+load_weights_folder: "/home/ANT.AMAZON.COM/grigiono/Desktop/PlaneDepth/pretrained/self-distillation"
 models_to_load: ["encoder", "depth"] #models to load
 stage1_weights_folder: "" #path of teacher model to load

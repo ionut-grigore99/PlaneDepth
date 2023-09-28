@@ -1,9 +1,3 @@
-# Copyright Niantic 2019. Patent Pending. All rights reserved.
-#
-# This software is licensed under the terms of the Monodepth2 licence
-# which allows for non-commercial use only, the full terms of which are made
-# available in the LICENSE file.
-
 from __future__ import absolute_import, division, print_function
 
 import os, shutil
@@ -14,9 +8,16 @@ from six.moves import urllib
 from collections import Counter
 
 
+def pil_loader(path):
+    # open path as file to avoid ResourceWarning
+    # (https://github.com/python-pillow/Pillow/issues/835)
+    with open(path, 'rb') as f:
+        with Image.open(f) as img:
+            return img.convert('RGB')
+
 def save_code(srcfile, log_path):
     #save depth_decoder.py to log, easy to evaluation
-    #srcfile = "./networks/depth_decoder.py"
+    #srcfile = "./networks/depth_decoder.py" for example, it is used in trainer
     if not os.path.isfile(srcfile):
         print ("%s not exist!"%(srcfile))
     else:
@@ -32,15 +33,6 @@ def readlines(filename):
     with open(filename, 'r') as f:
         lines = f.read().splitlines()
     return lines
-
-
-def normalize_image(x):
-    """Rescale image pixels to span range [0, 1]
-    """
-    ma = float(x.max().cpu().data)
-    mi = float(x.min().cpu().data)
-    d = ma - mi if ma != mi else 1e5
-    return (x - mi) / d
 
 
 def sec_to_hm(t):
@@ -62,6 +54,13 @@ def sec_to_hm_str(t):
     h, m, s = sec_to_hm(t)
     return "{:02d}h{:02d}m{:02d}s".format(h, m, s)
 
+def normalize_image(x):
+    """Rescale image pixels to span range [0, 1]
+    """
+    ma = float(x.max().cpu().data)
+    mi = float(x.min().cpu().data)
+    d = ma - mi if ma != mi else 1e5
+    return (x - mi) / d
 
 def download_model_if_doesnt_exist(model_name):
     """If pretrained kitti model doesn't exist, download and unzip it
@@ -284,4 +283,430 @@ def generate_depth_map(calib_dir, velo_filename, cam=2, vel_depth=False):
     depth[depth < 0] = 0
 
     return depth
-#dummy
+
+def init_seeds(seed=0, cuda_deterministic=True):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    #torch.cuda.manual_seed(seed) # torch doc says that torch.manual_seed also work for CUDA
+    #Speed-reproducibility tradeoff -> https://pytorch.org/docs/stable/notes/randomness.html
+    if cuda_deterministic:  # slower, more reproducible
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+    else:  # faster, less reproducible
+        torch.backends.cudnn.deterministic = False
+        torch.backends.cudnn.benchmark = True
+
+def worker_init():
+    worker_seed = torch.utils.data.get_worker_info().seed % (2**32)
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
+
+def log_time(batch_idx, duration, losses):
+    """
+        Print a logging statement to the terminal
+    """
+    samples_per_sec = self.opt.batch_size * torch.cuda.device_count() / duration
+    time_sofar = time.time() - self.start_time
+    training_time_left = (self.num_total_steps / self.step - 1.0) * time_sofar if self.step > 0 else 0
+    print_string = "epoch {:>3} | batch {:>6} | examples/s: {:5.1f}" + \
+                   " | loss: {:.5f} | time elapsed: {} | time left: {}"
+    print(print_string.format(self.epoch, batch_idx, samples_per_sec, losses["loss/total_loss"].cpu().data,
+                              sec_to_hm_str(time_sofar), sec_to_hm_str(training_time_left)))
+
+def log(writers, mode, losses, step):
+    """
+        Write an event to the tensorboard events file
+    """
+    writer = writers[mode]
+    for l, v in losses.items():
+        writer.add_scalar(l, v, step)
+
+def log_img(writers, mode, inputs, outputs, val_idx, batch_size, epoch, target_sides):
+    """
+        Write an event to the tensorboard events file
+    """
+    writer = writers[mode]
+
+    for j in range(min(4, batch_size)):  # write a maximum of four images
+        for frame_id in ["l", "r"] + self.opt.novel_frame_ids:
+            writer.add_image(
+                "color_{}/{}".format(frame_id, epoch),
+                inputs[("color", frame_id)][j].data, val_idx + j)
+
+        if mode == "train":
+
+            for frame_id in target_sides:
+                writer.add_image(
+                    "color_pred_{}/{}".format(frame_id, epoch),
+                    outputs[("rgb_rec", frame_id)][j].data, val_idx + j)
+
+            if "disp_pp" in outputs:
+                writer.add_image(
+                    "disp_pp/{}".format(epoch),
+                    normalize_image(outputs["disp_pp"][j]), val_idx + j)
+
+        writer.add_image(
+            "disp/{}".format(epoch),
+            normalize_image(outputs["disp"][j]), val_idx + j)
+
+def save_opts(log_path):
+    """
+        Save options to disk so we know what we ran this experiment with
+    """
+    models_dir = log_path
+    if not os.path.exists(models_dir):
+        os.makedirs(models_dir)
+    to_save = self.opt.__dict__.copy() #aici trebuie sa modific pt ca eu am yaml
+
+    with open(os.path.join(models_dir, 'opt.json'), 'w') as f:
+        json.dump(to_save, f, indent=2)
+
+def save_model(folder_name, log_path, models, model_optimizer, height, width):
+    """
+        Save model weights to disk
+    """
+    save_folder = os.path.join(log_path, folder_name)
+    if not os.path.exists(save_folder):
+        os.makedirs(save_folder)
+
+    for model_name, model in models.items():
+        save_path = os.path.join(save_folder, "{}.pth".format(model_name))
+        to_save = model.module.state_dict()
+        if model_name == 'encoder':
+            # save the sizes - these are needed at prediction time
+            to_save['height'] = height
+            to_save['width'] = width
+        torch.save(to_save, save_path)
+
+    save_path = os.path.join(save_folder, "{}.pth".format("adam"))
+    torch.save(model_optimizer.state_dict(), save_path)
+
+
+def add_flip_right_inputs(inputs):
+    new_inputs = {}
+    new_inputs[("color", "l")] = torch.cat([inputs[("color", "l")], inputs[("color", "r")].flip(-1)], dim=0)
+    new_inputs[("color", "r")] = torch.cat([inputs[("color", "r")], inputs[("color", "l")].flip(-1)], dim=0)
+    new_inputs[("color_aug", "l")] = torch.cat([inputs[("color_aug", "l")], inputs[("color_aug", "r")].flip(-1)], dim=0)
+    new_inputs[("color_aug", "r")] = torch.cat([inputs[("color_aug", "r")], inputs[("color_aug", "l")].flip(-1)], dim=0)
+    grid_fliped = inputs["grid"].clone()
+    grid_fliped[:, 0, :, :] *= -1.
+    grid_fliped = grid_fliped.flip(-1)
+    new_inputs["grid"] = torch.cat([inputs["grid"], grid_fliped], dim=0)
+    new_inputs[("depth_gt", "l")] = torch.cat([inputs[("depth_gt", "l")], inputs[("depth_gt", "r")].flip(-1)], dim=0)
+    new_inputs[("depth_gt", "r")] = torch.cat([inputs[("depth_gt", "r")], inputs[("depth_gt", "l")].flip(-1)], dim=0)
+
+    new_inputs["K"] = inputs["K"].repeat(2, 1, 1)
+    new_inputs["inv_K"] = inputs["inv_K"].repeat(2, 1, 1)
+
+    new_inputs[("Rt", "l")] = inputs[("Rt", "l")].repeat(2, 1, 1)
+    new_inputs[("Rt", "r")] = inputs[("Rt", "r")].repeat(2, 1, 1)
+
+    # The the left +1/-1 frame becomes the right side, but it should not affect the training
+    for novel_frame_id in get('novel_frame_ids'):
+        new_inputs[("color", novel_frame_id)] = torch.cat(
+            [inputs[("color", novel_frame_id)], inputs[("color", novel_frame_id)].flip(-1)], dim=0)
+        new_inputs[("color_aug", novel_frame_id)] = torch.cat(
+            [inputs[("color_aug", novel_frame_id)], inputs[("color_aug", novel_frame_id)].flip(-1)], dim=0)
+
+    return new_inputs
+
+
+def predict_poses(inputs):
+    """
+        Predict poses between input frames for monocular sequences.
+    """
+    outputs = {}
+    # In this setting, we compute the pose to each source frame via a
+    # separate forward pass through the pose network.
+    outputs[("Rt", "r")] = inputs[("Rt", "r")]
+
+    for f_i in get('novel_frame_ids'):
+
+        if not get('use_colmap'):
+            if f_i < 0:
+                pose_inputs = [inputs[("color_aug", f_i)], inputs[("color_aug", "l")]]
+            else:
+                pose_inputs = [inputs[("color_aug", "l")], inputs[("color_aug", f_i)]]
+
+            pose_inputs = [models["pose_encoder"](torch.cat(pose_inputs, 1))]
+
+            axisangle, translation = models["pose_decoder"](pose_inputs, inputs["grid"])
+            outputs[("axisangle", f_i)] = axisangle
+            outputs[("translation", f_i)] = translation
+
+            # Invert the matrix if the frame id is negative
+            Rt = transformation_from_parameters(
+                axisangle[:, 0], translation[:, 0], invert=(f_i < 0))
+        else:
+            Rt = inputs[("Rt", f_i)].float()
+
+        Rt_Rc = torch.zeros_like(Rt)
+
+        gx0 = (inputs["grid"][:, 0, 0, -1] + inputs["grid"][:, 0, 0, 0]) / 2.
+        gy0 = (inputs["grid"][:, 1, -1, 0] + inputs["grid"][:, 1, 0, 0]) / 2.
+        f = (inputs["grid"][:, 0, 0, -1] - inputs["grid"][:, 0, 0, 0]) / 2.
+        Rc_v = torch.stack([-gx0 / (2 * 0.58), -gy0 / (2 * 1.92), f], dim=1)
+        Rc = torch.eye(3).cuda()
+        Rc = Rc[None, :, :].repeat(Rc_v.shape[0], 1, 1)
+        Rc[:, :, 2] = Rc_v
+        outputs[("Rc", f_i)] = Rc
+        Rt_Rc[:, :3, :3] = torch.matmul(Rc, torch.matmul(Rt[:, :3, :3], torch.inverse(Rc)))
+        if get('use_colmap'):
+            Rt_Rc[:, :3, 3:4] = torch.matmul(Rc, Rt[:, :3, 3:4])
+
+        outputs[("Rt", f_i)] = Rt_Rc
+
+    return outputs
+
+
+def generate_post_process_disp(inputs):
+    # set_eval()
+    input_images = torch.cat([inputs[("color_aug", "l")], inputs[("color_aug", "l")].flip(-1)], dim=0)
+    if get('num_ep') > 0:
+        grid_fliped = inputs["grid"].clone()
+        grid_fliped[:, 0, :, :] *= -1.
+        grid_fliped = grid_fliped.flip(-1)
+        input_grids = torch.cat([inputs["grid"], grid_fliped], dim=0)
+
+    if get('model').get('net_type') == "ResNet":
+        features = fixed_models["encoder"](input_images)
+        outputs = fixed_models["depth"](features, input_grids)
+    elif get('model').get('net_type') == "PladeNet":
+        outputs = models["plade"](input_images, input_grids)
+    elif get('model').get('net_type') == "FalNet":
+        outputs = models["fal"](input_images)
+
+    B, N, H, W = outputs["probability"].shape
+    B = B // 2
+    pix_coords = torch.meshgrid(torch.arange(W), torch.arange(H), indexing="xy")
+    pix_coords = torch.stack(pix_coords, dim=0).cuda().float()
+
+    pix_coords_r = pix_coords[None, None, ...].expand(B, N, -1, -1, -1).clone()
+    pix_coords_r[:, :, 0, :, :] += outputs["disp_layered"][:B, ...]
+    pix_coords_r[:, :, 0, :, :] /= (W - 1)
+    pix_coords_r[:, :, 1, :, :] /= (H - 1)
+    pix_coords_r = (pix_coords_r - 0.5) * 2
+    pix_coords_r = pix_coords_r.reshape(B * N, 2, H, W)
+    pix_coords_r = pix_coords_r.permute(0, 2, 3, 1)
+
+    pix_coords_l = pix_coords[None, None, ...].expand(B, N, -1, -1, -1).clone()
+    pix_coords_l[:, :, 0, :, :] -= outputs["disp_layered"][B:, ...]
+    pix_coords_l[:, :, 0, :, :] /= (W - 1)
+    pix_coords_l[:, :, 1, :, :] /= (H - 1)
+    pix_coords_l = (pix_coords_l - 0.5) * 2
+    pix_coords_l = pix_coords_l.reshape(B * N, 2, H, W)
+    pix_coords_l = pix_coords_l.permute(0, 2, 3, 1)
+
+    # pll = outputs_stage1["probability"][:B, ...]
+    pl = outputs["logits"][:B, ...].reshape(B * N, 1, H, W)
+    plr = F.grid_sample(pl, pix_coords_r, padding_mode="zeros", align_corners=True).reshape(B, N, H, W)
+    plr = softmax(plr)
+    plr = plr.reshape(B * N, 1, H, W)
+    o_l = F.grid_sample(plr, pix_coords_l, padding_mode="zeros", align_corners=True).reshape(B, N, H, W)
+    o_l = o_l.sum(1, True)
+    o_l[o_l > 1] = 1
+
+    pfr = outputs["logits"][B:, ...].flip(-1).reshape(B * N, 1, H, W)
+    pfrl = F.grid_sample(pfr, pix_coords_l, padding_mode="zeros", align_corners=True).reshape(B, N, H, W)
+    pfrl = softmax(pfrl).reshape(B * N, 1, H, W)
+    o_fr = F.grid_sample(pfrl, pix_coords_r, padding_mode="zeros", align_corners=True).reshape(B, N, H, W)
+    o_fr = o_fr.sum(1, True)
+    o_fr[o_fr > 1] = 1
+
+    mean_disp = outputs["disp"][:B, ...] * 0.5 + outputs["disp"][B:, ...].flip(-1) * 0.5
+
+    disp_pp = mean_disp * o_fr + outputs["disp"][:B, ...] * (1 - o_fr)
+    disp_pp = disp_pp * o_l + outputs["disp"][-B:, ...].flip(-1) * (1 - o_l)
+
+    mask_novel = F.grid_sample(outputs["probability"][:B, ...].reshape(B * N, 1, H, W), pix_coords_r,
+                               padding_mode="zeros", align_corners=True).reshape(B, N, H, W)
+    mask_novel = mask_novel.sum(1, True)
+    mask_novel[mask_novel > 1] = 1
+    return disp_pp.detach(), mask_novel.detach()
+
+
+def val():
+    """
+        Validate the model on a single minibatch
+    """
+
+    # Convert all models to testing/evaluation mode
+    for m in models.values():
+        m.eval()
+    num = 0
+    metrics = {}
+    with torch.no_grad():
+        for batch_idx, inputs in enumerate(val_loader):
+            # outputs, losses = process_batch(inputs)
+            # losses.update(compute_depth_losses(inputs, outputs))
+            for key, ipt in inputs.items():
+                inputs[key] = ipt.to(device)
+
+            # maybe we need use the same name for different model in models
+            if get('model').get('net_type') == "ResNet":
+                features = models["encoder"](inputs[("color_aug", "l")])
+                outputs = models["depth"](features, inputs["grid"])
+            elif get('model').get('net_type') == "PladeNet":
+                outputs = models["plade"](inputs[("color_aug", "l")], inputs["grid"])
+            elif get('model').get('net_type') == "FalNet":
+                outputs = models["fal"](inputs[("color_aug", "l")])
+
+            losses = compute_depth_losses(inputs, outputs)
+            B = inputs[("color_aug", "l")].shape[0]
+            num += B
+            for k, v in losses.items():
+                if k in metrics:
+                    metrics[k] += v * B
+                else:
+                    metrics[k] = v * B
+
+            '''if batch_idx % self.opt.log_img_frequency == 0'''
+            if batch_idx % 250 == 0 and local_rank == 0:
+                log_img("val", inputs, outputs, batch_idx)
+            del inputs, outputs, losses
+        # since the eval batch size is not the same
+        # we need to sum them then mean
+        num = torch.ones(1).cuda() * num
+        dist.all_reduce(num, op=dist.ReduceOp.SUM)
+        for k, v in metrics.items():
+            dist.all_reduce(metrics[k], op=dist.ReduceOp.SUM)
+            metrics[k] = metrics[k] / num
+        if metrics["de/abs_rel"] < best_absrel:
+            best_absrel = metrics["de/abs_rel"]
+            if local_rank == 0:
+                save_model("best_models")
+
+        if local_rank == 0:
+            log("val", metrics)
+            print("\n  " + ("{:>8} | " * 7).format("abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3"))
+            print(("&{: 8.4f}  " * 7).format(*[metrics[k].cpu().data[0] for k in depth_metric_names]) + "\\\\")
+            # write to log file
+            print("\n  " + ("{:>8} | " * 7).format("abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3"),
+                  file=log_file)
+            print(("&{: 8.4f}  " * 7).format(*[metrics[k].cpu().data[0] for k in depth_metric_names]) + "\\\\",
+                  file=log_file)
+
+    # Convert all models to training mode
+    for m in models.values():
+        m.train()
+
+
+def pred_novel_images(inputs, outputs):
+    """Generate the warped (reprojected) color images for a minibatch.
+    Generated images are saved into the `outputs` dictionary.
+    """
+
+    B, N, H, W = outputs["probability"].shape
+
+    source_side = "l"
+
+    for target_side in target_sides:
+        if get('warp_type') == "depth_warp":
+            disps = outputs["disp_layered"]
+            depths = 0.1 * 0.58 * W / disps
+            T = inputs[("Rt", target_side)][:, None, :, :].expand(-1, N, -1, -1).reshape(B * N, 4, 4)
+            cam_points = backproject_depth(depths.reshape(B * N, 1, H, W),
+                                           inputs["inv_K"][:, None, :, :].expand(-1, N, -1, -1).reshape(B * N, 4, 4))
+            pix_coords = project_3d(cam_points, inputs["K"][:, None, :, :].expand(-1, N, -1, -1).reshape(B * N, 4, 4),
+                                    T)  # BN, H, W, 2
+
+        elif get('warp_type') == "disp_warp":
+            disps = outputs["disp_layered"]
+            pix_coords = torch.meshgrid(torch.arange(W), torch.arange(H), indexing="xy")
+            pix_coords = torch.stack(pix_coords, dim=0).cuda().float()
+            pix_coords = pix_coords[None, None, ...].expand(B, N, -1, -1, -1).clone()
+            if target_side == "l":
+                pix_coords[:, :, 0, :, :] -= disps
+            elif target_side == "r":
+                pix_coords[:, :, 0, :, :] += disps
+            pix_coords[:, :, 0, :, :] /= (W - 1)
+            pix_coords[:, :, 1, :, :] /= (H - 1)
+            pix_coords = (pix_coords - 0.5) * 2
+            pix_coords = pix_coords.reshape(B * N, 2, H, W)
+            pix_coords = pix_coords.permute(0, 2, 3, 1)
+            padding_mask = outputs["padding_mask"][:, :, None, :, :]
+
+        elif get('warp_type') == "homography_warp":
+            T = outputs[("Rt", target_side)][:, None, :, :].expand(-1, N, -1, -1).reshape(B * N, 4, 4)
+            K = inputs["K"][:, None, :, :].expand(-1, N, -1, -1).reshape(B * N, 4, 4)
+            inv_K = inputs["inv_K"][:, None, :, :].expand(-1, N, -1, -1).reshape(B * N, 4, 4)
+            pix_coords, padding_mask = homography_warp(outputs["distance"], outputs["norm"], T, K, inv_K)
+
+        if get('match_aug'):
+            color_name = "color_aug"
+        else:
+            color_name = "color"
+
+        features = torch.cat(
+            [inputs[(color_name, source_side)][:, None].expand(-1, N, -1, -1, -1).reshape(B * N, 3, H, W), \
+             outputs["logits"].reshape(B * N, 1, H, W)], dim=1)
+
+        if get('use_mixture_loss'):
+            features = torch.cat([features, outputs["sigma"].reshape(B * N, 1, H, W)], dim=1)
+
+        rec_features = F.grid_sample(
+            features,
+            pix_coords,
+            padding_mode="zeros",
+            align_corners=True).reshape(B, N, -1, H, W)
+
+        # only stereo could compute as this.
+        rec_features = rec_features * padding_mask
+
+        outputs[("rgb_rec_layered", target_side)] = rec_features[:, :, :3, ...]
+        outputs[("logit_rec", target_side)] = rec_features[:, :, 3, ...]
+        if get('render_probability'):
+            # We read dists from output since the layered depth of stereo pair is the same.
+            # otherwise we should recompute it.
+            alpha = 1. - torch.exp(-F.relu(outputs[("logit_rec", target_side)][:, :-1, ...]) * outputs["dists"])
+            ones = torch.ones_like(alpha[:, :1, ...])
+            alpha = torch.cat([alpha, ones], dim=1)
+            probability_rec = alpha * torch.cumprod(torch.cat([ones, 1. - alpha + 1e-10], dim=1), dim=1)[:, :-1, ...]
+            outputs[("probability_rec", target_side)] = probability_rec
+        else:
+            outputs[("probability_rec", target_side)] = softmax(outputs[("logit_rec", target_side)])
+        if get('use_mixture_loss'):
+            sigma_rec = rec_features[:, :, 4, ...].clone()
+            # sigma_rec[sigma_rec==0] = 1.
+            sigma_rec = torch.clamp(sigma_rec, 0.01, 1.)
+            outputs[("sigma_rec", target_side)] = sigma_rec
+            outputs[("pi_rec", target_side)] = pi_rec = outputs[("probability_rec", target_side)]
+            weights_rec = pi_rec / sigma_rec
+            weights_rec = weights_rec / weights_rec.sum(1, True)
+            outputs[("probability_rec", target_side)] = weights_rec
+            outputs[("rgb_rec", target_side)] = (
+                        outputs[("rgb_rec_layered", target_side)] * outputs[("probability_rec", target_side)][:, :,
+                                                                    None]).sum(1)
+
+
+def pred_self_images(inputs, outputs):
+    """
+    Generate the warped (reprojected) color images for a minibatch.
+    Generated images are saved into the `outputs` dictionary.
+    """
+    disp = outputs["disp"]
+    B, N, H, W = outputs["probability"].shape
+
+    depth = 0.1 * 0.58 * W / disp
+    T = inputs[("Rt", "r")]
+    cam_points = backproject_depth(depth, inputs["inv_K"])
+    pix_coords = project_3d(cam_points, inputs["K"], T)  # BN, H, W, 2
+
+    if get('match_aug'):
+        color_name = "color_aug"
+    else:
+        color_name = "color"
+
+    features = inputs[(color_name, "r")]
+
+    rec_features = F.grid_sample(
+        features,
+        pix_coords,
+        padding_mode="border",
+        align_corners=True)
+
+    # only stereo could compute as this.
+    # rec_features = rec_features * outputs["padding_mask"][:, :, None, ...]
+
+    outputs["self_rec"] = rec_features

@@ -1,33 +1,9 @@
-# Copyright (C) 2021  Juan Luis Gonzalez Bello (juanluisgb@kaist.ac.kr)
-# This software is not for commercial use
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
 
-from networks.layers import create_camera_plane
-
-
-# def FAL_net2B_gep(data=None, no_levels=49):
-#     model = FAL_net(batchNorm=False, no_levels=no_levels)
-#     if data is not None:
-#         model.load_state_dict(data['state_dict'])
-#     return model
+from .layers import create_camera_plane
 
 
 def conv_elu(batchNorm, in_planes, out_planes, kernel_size=3, stride=1, pad=1):
@@ -72,9 +48,9 @@ class residual_block(nn.Module):
         return x
 
 
-class BackBone(nn.Module):
+class Backbone(nn.Module):
     def __init__(self, batchNorm=False, no_in=3, no_out=64, no_ep=8):
-        super(BackBone, self).__init__()
+        super(Backbone, self).__init__()
         self.batchNorm = batchNorm
         self.no_ep = no_ep
 
@@ -213,9 +189,9 @@ class PladeNet(nn.Module):
         self.no_fac = 1
         self.num_ep = num_ep
         if render_probability:
-            self.backbone = BackBone(batchNorm, no_in=3, no_out=self.no_levels + self.xz_levels - 1, no_ep=num_ep)
+            self.backbone = Backbone(batchNorm, no_in=3, no_out=self.no_levels + self.xz_levels - 1, no_ep=num_ep)
         else:
-            self.backbone = BackBone(batchNorm, no_in=3, no_out=self.no_levels + self.xz_levels, no_ep=num_ep)
+            self.backbone = Backbone(batchNorm, no_in=3, no_out=self.no_levels + self.xz_levels, no_ep=num_ep)
         self.softmax = nn.Softmax(dim=1)
         self.elu = nn.ELU(inplace=True)
         self.sigmoid = nn.Sigmoid()

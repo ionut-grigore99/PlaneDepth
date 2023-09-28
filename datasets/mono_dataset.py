@@ -1,9 +1,3 @@
-# Copyright Niantic 2019. Patent Pending. All rights reserved.
-#
-# This software is licensed under the terms of the Monodepth2 licence
-# which allows for non-commercial use only, the full terms of which are made
-# available in the LICENSE file.
-
 from __future__ import absolute_import, division, print_function
 from ast import Try
 
@@ -13,7 +7,6 @@ import random
 from matplotlib import scale
 import numpy as np
 import copy, shutil, json
-#from PIL import Image  # using pillow-simd for increased speed
 
 import torch
 import torch.utils.data as data
@@ -23,26 +16,21 @@ import torch.nn.functional as F
 from utils import *
 from . import pair_transforms
 
-def pil_loader(path):
-    # open path as file to avoid ResourceWarning
-    # (https://github.com/python-pillow/Pillow/issues/835)
-    with open(path, 'rb') as f:
-        with Image.open(f) as img:
-            return img.convert('RGB')
-
 
 class MonoDataset(data.Dataset):
     """Superclass for monocular dataloaders
 
     Args:
-        data_path
-        filenames
-        height
-        width
-        frame_idxs
-        num_scales
-        is_train
-        img_ext
+        -data_path
+        -filenames
+        -height
+        -width
+        -frame_idxs
+        -is_train
+        -use_crop
+        -colmap_path - optionale, niste aiureli oricum, se foloseste doar pt antrenare
+        -use_colmap  - optionale, niste aiureli oricum
+        -img_ext  #image extension -> .png sau .jpg
     """
     def __init__(self,
                  data_path,
@@ -52,7 +40,7 @@ class MonoDataset(data.Dataset):
                  novel_frame_ids,
                  is_train=False,
                  use_crop=True,
-                 colmap_path="./kitti_colmap",
+                 colmap_path="./kitti_colmap", #ce plm e colmap???
                  use_colmap=True,
                  img_ext='.jpg'):
         super(MonoDataset, self).__init__()
@@ -62,15 +50,12 @@ class MonoDataset(data.Dataset):
         self.height = height
         self.width = width
         self.interp = Image.ANTIALIAS
-
         self.novel_frame_ids = novel_frame_ids
-
         self.is_train = is_train
         self.use_crop = use_crop
         self.use_colmap = use_colmap and self.is_train
         self.colmap_path = colmap_path
         self.img_ext = img_ext
-
         self.loader = pil_loader
         self.to_tensor = pair_transforms.ToTensor()
         if self.use_crop:
@@ -89,10 +74,12 @@ class MonoDataset(data.Dataset):
         self.no_data_aug = transforms.Compose([self.to_tensor,
                                                pair_transforms.Resize((self.height, self.width))])
         
-        
+
+
+        ##############################COLMAP PLM?????#######################################
         """
-        we do colmap in _getitem_ at first, but it will leadding dataloader return none
-        so we remove those no colmap data
+        We do colmap in _getitem_ at first, but it will leadding dataloader return none
+        so we remove those no colmap data.
         """
         if self.use_colmap:
             new_filenames = []
@@ -109,22 +96,8 @@ class MonoDataset(data.Dataset):
                 if os.path.exists(os.path.join(pose_path, "poses.npy")) and os.path.exists(os.path.join(pose_path, "poses_flip.npy")):
                     new_filenames.append(self.filenames[index])
             self.filenames = new_filenames
+        ##############################COLMAP PLM?????#######################################
 
-    def preprocess(self, inputs, color_aug):
-        """Resize colour images to the required scales and augment if required
-
-        We create the color_aug object in advance and apply the same augmentation to all
-        images in this item. This ensures that all images input to the pose network receive the
-        same augmentation.
-        """
-        for k in list(inputs):
-            frame = inputs[k]
-            if "color" in k:
-                n, im, i = k
-                inputs[(n, im)] = self.resize(inputs[(n, im, i)])
-                inputs[(n + "_aug", im)] = color_aug(inputs[(n, im)])
-                inputs[(n, im)] = self.to_tensor(inputs[(n, im)])
-                inputs[(n + "_aug", im)] = self.to_tensor(inputs[(n + "_aug", im)])
 
     def __len__(self):
         return len(self.filenames)
@@ -213,7 +186,9 @@ class MonoDataset(data.Dataset):
         # for k,v in os.environ.items():
         #     print(k, v)
         # quit()
-        
+
+
+        ###############################################################################################################
         if self.use_colmap:
             try:
                 image_paths = {}
@@ -222,7 +197,7 @@ class MonoDataset(data.Dataset):
                 for novel_frame_id in self.novel_frame_ids:
                     image_paths[(novel_frame_id, "l")] = self.get_image_path(folder, frame_index+novel_frame_id, "l")
                     image_paths[(novel_frame_id, "r")] = self.get_image_path(folder, frame_index+novel_frame_id, "r")
-                    
+
                 colmap_path = image_paths[(0, "l")].replace(self.data_path, self.colmap_path).replace("/image_02/data/", "/").replace(self.img_ext, "/")
                 if not os.path.exists(colmap_path):
                     colmap_image_path = os.path.join(colmap_path, "images/")
@@ -240,16 +215,16 @@ class MonoDataset(data.Dataset):
                     poses_original, poses_flip = self.rectify_poses(os.path.join(colmap_path, "images.txt"))
                     #save
                     # poses_original_json = json.dumps(poses_original)
-                    # with open(os.path.join(colmap_path, "poses.json"), "w") as f:  
+                    # with open(os.path.join(colmap_path, "poses.json"), "w") as f:
                     #     f.write(poses_original_json)
                     #     f.close()
                     # poses_flip_json = json.dumps(poses_flip)
-                    # with open(os.path.join(colmap_path, "poses_flip.json"), "w") as f:  
+                    # with open(os.path.join(colmap_path, "poses_flip.json"), "w") as f:
                     #     f.write(poses_flip_json)
                     #     f.close()
                     np.save(os.path.join(colmap_path, "poses.npy"), poses_original)
                     np.save(os.path.join(colmap_path, "poses_flip.npy"), poses_flip)
-                    
+
                 if do_flip:
                     # pose_file = open(os.path.join(colmap_path, "poses_flip.json"), "r")
                     # poses = json.load(pose_file)
@@ -266,6 +241,7 @@ class MonoDataset(data.Dataset):
                     inputs[k] = None
                 for frame_id in self.novel_frame_ids:
                     inputs[("Rt", frame_id)] = None
+        ###############################################################################################################
 
         return inputs
 
@@ -319,14 +295,18 @@ class MonoDataset(data.Dataset):
             poses_flip[("Rt", frame_id)][1:, 0] *= -1.
         return poses_original, poses_flip
     
-    def qvec2rotmat(self, qvec):
-        return np.array([
+    def qvec2rotmat(self, qvec): #it returns a 3x3 matrix
+        return np.array(
+            [
             [1 - 2 * float(qvec[2])**2 - 2 * qvec[3]**2,
             2 * qvec[1] * qvec[2] - 2 * qvec[0] * qvec[3],
-            2 * qvec[3] * qvec[1] + 2 * qvec[0] * qvec[2]],
+            2 * qvec[3] * qvec[1] + 2 * qvec[0] * qvec[2]
+            ],
             [2 * qvec[1] * qvec[2] + 2 * qvec[0] * qvec[3],
             1 - 2 * qvec[1]**2 - 2 * qvec[3]**2,
-            2 * qvec[2] * qvec[3] - 2 * qvec[0] * qvec[1]],
+            2 * qvec[2] * qvec[3] - 2 * qvec[0] * qvec[1]
+            ],
             [2 * qvec[3] * qvec[1] - 2 * qvec[0] * qvec[2],
             2 * qvec[2] * qvec[3] + 2 * qvec[0] * qvec[1],
-            1 - 2 * qvec[1]**2 - 2 * qvec[2]**2]], dtype=np.float32)
+            1 - 2 * qvec[1]**2 - 2 * qvec[2]**2]
+            ], dtype=np.float32)

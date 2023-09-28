@@ -1,5 +1,5 @@
 model:
-  name: mdp #name of the folder to save the model in, trebuie sa vad ce naiba pun aici
+  name: exp1 #name of the folder to save the model in, trebuie sa vad ce naiba pun aici
   net_type: ResNet #train which network; choices=["PladeNet", "ResNet", "FalNet"]; ResNet e folosit in paper, celelalte 2 sunt pt comparisons
   num_resnet_layers: 50 # number of resnet layers for encoder; choices: [18, 34, 50, 101, 152])
   use_denseaspp: True #if set, use DenseAspp block in ResNet between the first two blocks of the depth decoder

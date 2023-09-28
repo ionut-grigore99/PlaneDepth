@@ -1,9 +1,3 @@
-# Copyright Niantic 2019. Patent Pending. All rights reserved.
-#
-# This software is licensed under the terms of the Monodepth2 licence
-# which allows for non-commercial use only, the full terms of which are made
-# available in the LICENSE file.
-
 from __future__ import absolute_import, division, print_function
 
 import os
@@ -16,7 +10,8 @@ from .mono_dataset import MonoDataset
 
 
 class KITTIDataset(MonoDataset):
-    """Superclass for different types of KITTI dataset loaders
+    """
+    Superclass for different types of KITTI dataset loaders
     """
     def __init__(self, *args, **kwargs):
         super(KITTIDataset, self).__init__(*args, **kwargs)
@@ -56,7 +51,8 @@ class KITTIDataset(MonoDataset):
 
 
 class KITTIRAWDataset(KITTIDataset):
-    """KITTI dataset which loads the original velodyne depth maps for ground truth
+    """
+    KITTI dataset which loads the original velodyne depth maps for ground truth
     """
     def __init__(self, *args, **kwargs):
         super(KITTIRAWDataset, self).__init__(*args, **kwargs)
@@ -86,7 +82,8 @@ class KITTIRAWDataset(KITTIDataset):
 
 
 class KITTIOdomDataset(KITTIDataset):
-    """KITTI dataset for odometry training and testing
+    """
+    KITTI dataset for odometry training and testing
     """
     def __init__(self, *args, **kwargs):
         super(KITTIOdomDataset, self).__init__(*args, **kwargs)
@@ -102,7 +99,8 @@ class KITTIOdomDataset(KITTIDataset):
 
 
 class KITTIDepthDataset(KITTIDataset):
-    """KITTI dataset which uses the updated ground truth depth maps
+    """
+    KITTI dataset which uses the updated ground truth depth maps
     """
     def __init__(self, *args, **kwargs):
         super(KITTIDepthDataset, self).__init__(*args, **kwargs)

@@ -1,9 +1,3 @@
-# Copyright Niantic 2019. Patent Pending. All rights reserved.
-#
-# This software is licensed under the terms of the Monodepth2 licence
-# which allows for non-commercial use only, the full terms of which are made
-# available in the LICENSE file.
-
 from __future__ import absolute_import, division, print_function
 
 import numpy as np
@@ -11,12 +5,15 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from .denseaspp import DenseAspp
+from pytorch_model_summary import summary
+from config.conf import LocalConf
 
 from collections import OrderedDict
-from networks.layers import *
+from .layers import *
 
 class DepthDecoder(nn.Module):
-    def __init__(self, num_ch_enc, 
+    def __init__(self,
+                 num_ch_enc,
                  no_levels=49, 
                  disp_min=2, 
                  disp_max=300, 
@@ -24,9 +21,9 @@ class DepthDecoder(nn.Module):
                  pe_type="neural",
                  use_skips=True, 
                  use_denseaspp=True, 
-                 xz_levels=0, 
-                 xz_min=0.1852, xz_max=0.3704, #xz_min=0.2315, xz_max=0.3426,#debugxz_min=0.001, xz_max=0.3704,#debug
-                 yz_levels=0,
+                 xz_levels=0, # ground_planes
+                 xz_min=0.1852, xz_max=0.3704, #xz_min=0.2315, xz_max=0.3426,#debugxz_min=0.001, xz_max=0.3704,#debug   -> asta e comentariul lor
+                 yz_levels=0, # vertical planes
                  yz_min=0.1, yz_max=10.,
                  use_mixture_loss=False, 
                  render_probability=False,
@@ -109,7 +106,7 @@ class DepthDecoder(nn.Module):
                                                        nn.Conv2d(self.num_ch_dec[0], self.all_levels, 1))
 
 
-        # self.convs["angleconv"] = nn.Conv2d(self.num_ch_dec[0], 1, 3)
+        # self.convs["angleconv"] = nn.Conv2d(self.num_ch_dec[0], 1, 3) #asta din nou e comentariul lor
         
 
         self.decoder = nn.ModuleList(list(self.convs.values()))
@@ -142,7 +139,7 @@ class DepthDecoder(nn.Module):
             if i == 4 and self.use_denseaspp:
                 x = self.convs["denseaspp"](x)
                 
-        # angle = (self.sigmoid(self.convs["angleconv"](x).mean(dim=-1).mean(dim=-1)) - 0.5) * 0.75 * np.pi
+        # angle = (self.sigmoid(self.convs["angleconv"](x).mean(dim=-1).mean(dim=-1)) - 0.5) * 0.75 * np.pi # comentariul lor
 
         B, _, H, W = x.shape
         disp_levels = torch.arange(self.no_levels).cuda()[None, :, None, None]
@@ -291,163 +288,32 @@ class DepthDecoder(nn.Module):
         self.outputs["depth"] = 0.1 * 0.58 * W / self.outputs["disp"]
 
         return self.outputs
-    
-    
-class DepthDecoderContinuous(nn.Module):
-    def __init__(self, num_ch_enc, 
-                 no_levels=49, 
-                 disp_min=2, 
-                 disp_max=300, 
-                 num_ep=0,
-                 pe_type="neural",
-                 use_skips=True, 
-                 use_denseaspp=True, 
-                 xz_levels=0, 
-                 xz_min=0.1852, xz_max=0.3704, #xz_min=0.2315, xz_max=0.3426,#
-                 use_mixture_loss=False, 
-                 render_probability=False,
-                 plane_residual=False):
-        super(DepthDecoderContinuous, self).__init__()
 
-        self.no_levels = no_levels
-        self.xz_levels = xz_levels
-        self.use_skips = use_skips
-        self.upsample_mode = 'nearest'
-        self.disp_min = disp_min
-        self.disp_max = disp_max
-        self.xz_min = xz_min
-        self.xz_max = xz_max
-        self.num_ep = num_ep
-        self.pe_type = pe_type
-        self.use_mixture_loss = use_mixture_loss
-        self.render_probability = render_probability
-        self.plane_residual = plane_residual
+if __name__ == '__main__':
+    conf = LocalConf().conf
+    get = lambda x: conf.get(x)
 
-        self.num_ch_enc = num_ch_enc
-        self.num_ch_dec = np.array([16, 32, 64, 128, 256])
-        
-        self.use_denseaspp = use_denseaspp
 
-        print("use {} xy plane and {} xz plane.".format(self.no_levels, self.xz_levels))
-        
-        # decoder
-        self.convs = OrderedDict()
-        
-        if self.num_ep > 0:
-            if self.pe_type == "neural":
-                self.convs["epconv"] = nn.Sequential(
-                nn.Conv2d(2, 16, kernel_size=1, stride=1, padding=0, bias=True),
-                nn.ELU(inplace=True),
-                nn.Conv2d(16, self.num_ep, kernel_size=1, stride=1, padding=0, bias=True),
-                nn.ELU(inplace=True)
-                )
-            elif self.pe_type == "frequency":
-                self.convs["epconv"] = get_embedder((self.num_ep//2 - 1)//2)
-        
-        for i in range(4, -1, -1):
-            # upconv_0
-            num_ch_in = self.num_ch_enc[-1]+self.num_ep if i == 4 else self.num_ch_dec[i + 1]
-            num_ch_out = self.num_ch_dec[i]
-            self.convs[("upconv", i, 0)] = ConvBlock(num_ch_in, num_ch_out)
+    model = DepthDecoder(num_layers=get('model').get('num_resnet_layers'), pretrained=True)
+    architecture = summary(model, torch.rand(1, 3, *get('im_sz')), max_depth=4, show_parent_layers=True,
+                           print_summary=True)
 
-            # upconv_1
-            num_ch_in = self.num_ch_dec[i]
-            if self.use_skips and i > 0:
-                num_ch_in += self.num_ch_enc[i - 1]
-            if i > 0:
-                num_ch_in += self.num_ep
-            num_ch_out = self.num_ch_dec[i]
-            self.convs[("upconv", i, 1)] = ConvBlock(num_ch_in, num_ch_out)
+    onnx = False
 
-        if use_denseaspp:
-            print("use DenseAspp Block")
-            self.convs["denseaspp"] = DenseAspp()
-            
-        self.convs["dispconv"] = Conv3x3(self.num_ch_dec[0], self.no_levels + self.xz_levels)
-            
-        if render_probability:
-            self.convs["piconv"] = Conv3x3(self.num_ch_dec[0], self.no_levels + self.xz_levels - 1)
-        else:
-            self.convs["piconv"] = Conv3x3(self.num_ch_dec[0], self.no_levels + self.xz_levels)
-        
-        if self.use_mixture_loss:
-            print("use mixture Lap loss")
-            self.convs["sigmaconv"] = Conv3x3(self.num_ch_dec[0], self.no_levels + self.xz_levels)
-            
-        if self.plane_residual:
-            print("use plane residual")
-            self.convs["residualconv"] = nn.Sequential(nn.Conv2d(self.num_ch_dec[0], self.num_ch_dec[0], 1),
-                                                       nn.AdaptiveAvgPool2d((1, 1)),
-                                                       nn.Conv2d(self.num_ch_dec[0], self.no_levels + self.xz_levels, 1))
+    if onnx:
+        # Convert to onnx in order to visualize in Netron
+        # Input to the model
+        x = torch.randn(1, 3, *get('im_sz'), requires_grad=True)
+        torch_out = model(x)
 
-        self.decoder = nn.ModuleList(list(self.convs.values()))
-        self.sigmoid = nn.Sigmoid()
-        self.softmax = nn.Softmax(1)
-        
-
-    def forward(self, input_features, input_grids=None):
-        self.outputs = {}
-        
-        if self.num_ep > 0:
-            grids_ep = self.convs["epconv"](input_grids)
-
-        # decoder
-        x = input_features[-1]
-        if self.num_ep > 0:
-            dgrid = F.interpolate(grids_ep, size=(x.shape[2], x.shape[3]), align_corners=True, mode='bilinear')
-            x = torch.cat([x, dgrid], dim=1)
-        for i in range(4, -1, -1):
-            x = self.convs[("upconv", i, 0)](x)
-            x = [upsample(x)]
-            if self.use_skips and i > 0:
-                x += [input_features[i - 1]]
-            x = torch.cat(x, 1)
-            if self.num_ep > 0 and i > 0:
-                dgrid = F.interpolate(grids_ep, size=(x.shape[2], x.shape[3]), align_corners=True, mode='bilinear')
-                x = torch.cat([x, dgrid], dim=1)
-            x = self.convs[("upconv", i, 1)](x)
-            
-            if i == 4 and self.use_denseaspp:
-                x = self.convs["denseaspp"](x)
-
-        B, _, H, W = x.shape
-
-        disp_levels = self.sigmoid(self.convs["dispconv"](x))#B, N, H, W
-        self.outputs["disp_levels"] = disp_levels
-        disp_layered = self.disp_max * (self.disp_min / self.disp_max)**disp_levels # B, N, H, W
-
-        self.outputs["disp_layered"] = disp_layered
-        logits = self.convs["piconv"](x)
-        self.outputs["logits"] = logits
-        if self.render_probability:
-            depth_layered = 0.1 * 0.58 * W / disp_layered
-            dists = depth_layered[:, 1:, ...] - depth_layered[:, :-1, ...]
-            # dists = torch.cat([dists, 1e10 * torch.ones_like(dists[:, :1])], dim=1)
-            camera_plane = create_camera_plane(height=H, width=W)
-            dists = dists * torch.linalg.norm(camera_plane, dim=1, keepdim=True)
-            self.outputs["dists"] = dists
-            alpha = 1. - torch.exp(-F.relu(self.outputs["logits"]) * dists)
-            ones = torch.ones_like(alpha[:, :1, ...])
-            alpha = torch.cat([alpha, ones], dim=1)
-            probability = alpha * torch.cumprod(torch.cat([torch.ones_like(alpha[:, :1, ...]), 1.-alpha+1e-10], dim=1), dim=1)[:, :-1, ...]
-            self.outputs["probability"] = probability
-            self.outputs["logits"] = torch.cat([self.outputs["logits"], ones], dim=1)
-        else:
-            self.outputs["probability"] = self.softmax(self.outputs["logits"])
-            
-        if self.use_mixture_loss:
-            sigma = self.sigmoid(self.convs["sigmaconv"](x))
-            sigma = torch.clamp(sigma, 0.01, 1.)
-            self.outputs["sigma"] = sigma
-            self.outputs["pi"] = pi = self.outputs["probability"]
-            weights = pi / sigma
-            # weights = weights * padding_mask
-            weights = weights / weights.sum(1, True)
-            self.outputs["probability"] = weights
-            candidates_idx = weights.argmax(1, True)
-            #self.outputs["disp"] = torch.gather(self.outputs["disp_layered"], 1, candidates_idx)#
-            
-        self.outputs["disp"] = (self.outputs["probability"] * self.outputs["disp_layered"]).sum(1, True)
-        self.outputs["depth"] = 0.1 * 0.58 * W / self.outputs["disp"]
-
-        return self.outputs
+        # Export the model
+        torch.onnx.export(model,  # model being run
+                          x,  # model input (or a tuple for multiple inputs)
+                          "resnet_encoder.onnx",  # where to save the model (can be a file or file-like object)
+                          export_params=True,  # store the trained parameter weights inside the model file
+                          opset_version=10,  # the ONNX version to export the model to
+                          do_constant_folding=True,  # whether to execute constant folding for optimization
+                          input_names=['input'],  # the model's input names
+                          output_names=['output'],  # the model's output names
+                          dynamic_axes={'input': {0: 'batch_size'},  # variable length axes
+                                        'output': {0: 'batch_size'}})

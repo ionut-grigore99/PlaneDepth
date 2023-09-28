@@ -2,6 +2,10 @@ import torch
 from torch import nn
 from torch.nn import BatchNorm2d as bn
 import torch.nn.functional as F
+from pytorch_model_summary import summary
+
+"Paper: we insert a DenseASPP module with dilation rates of r ∈ {3, 6, 12, 18, 24} " \
+"between the first two blocks of the DECODER!."
 
 class _DenseAsppBlock(nn.Sequential):
     """ ConvNet block for building DenseASPP. """
@@ -50,7 +54,7 @@ class DenseAspp(nn.Module):
         self.classification = nn.Sequential(
             nn.Dropout2d(p=dropout0),
             nn.Conv2d(in_channels=num_features + d_feature1 * 5, out_channels=num_features, kernel_size=1, padding=0),
-            #nn.Upsample(scale_factor=8, mode='bilinear')
+            #nn.Upsample(scale_factor=8, mode='bilinear') #comentata de ei, nu de mine
         )
         
     def forward(self, _input):
@@ -74,3 +78,19 @@ class DenseAspp(nn.Module):
         feature = self.classification(feature)
 
         return feature
+
+if __name__ == '__main__':
+
+    option=1 #1 means _DenseAsppBlock, 2 means DenseAspp
+
+    if option==1:
+        # for _DenseAsppBlock
+        model = _DenseAsppBlock()
+        architecture = summary(model, torch.rand(1, 3, *get('im_sz')), max_depth=4, show_parent_layers=True,
+                               print_summary=True)
+
+    else:
+        # for DenseAspp
+        model = DenseAspp()
+        architecture = summary(model, torch.rand(1, 3, *get('im_sz')), max_depth=4, show_parent_layers=True,
+                               print_summary=True)
